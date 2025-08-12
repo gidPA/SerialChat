@@ -1,6 +1,8 @@
-﻿using System;
+﻿
+using System;
 using System.IO.Ports;
 using System.Threading;
+using System.Text;
 
 namespace SerialChat
 {
@@ -34,11 +36,14 @@ namespace SerialChat
                     {
                         try
                         {
-                            string incoming = serialPort.ReadLine();
-                            Console.ForegroundColor = ConsoleColor.Green;
-                            Console.WriteLine($"\nFriend: {incoming}");
-                            Console.ResetColor();
-                            Console.Write("You: ");
+                            string incoming = ReadLineWithACK(serialPort);
+                            if (!string.IsNullOrEmpty(incoming))
+                            {
+                                Console.ForegroundColor = ConsoleColor.Green;
+                                Console.WriteLine($"\nScanner: {incoming}");
+                                Console.ResetColor();
+                                Console.Write("You: ");
+                            }
                         }
                         catch (TimeoutException)
                         {
@@ -104,6 +109,55 @@ namespace SerialChat
             {
                 if (serialPort.IsOpen)
                     serialPort.Close();
+            }
+        }
+
+        /// <summary>
+        /// Reads a line from the serial port that can be terminated by either:
+        /// - Carriage Return (\r)
+        /// - Line Feed (\n)
+        /// - ASCII ACK character (\x06)
+        /// </summary>
+        static string ReadLineWithACK(SerialPort port)
+        {
+            StringBuilder buffer = new StringBuilder();
+            
+            while (true)
+            {
+                int byteRead = port.ReadByte(); // This will throw TimeoutException if no data
+                char ch = (char)byteRead;
+                
+                // Check for termination characters
+                if (ch == '\r' || ch == '\n' || ch == '\x06' || ch == '\x15' || ch == '\x05') // CR, LF, ACK, NAK, or ENQ
+                {
+                    string result = buffer.ToString();
+                    
+                    // Display special characters for debugging
+                    // if (ch == '\x06')
+                    // {
+                    //     Console.ForegroundColor = ConsoleColor.Yellow;
+                    //     Console.WriteLine($"[ACK received after: '{result}']");
+                    //     Console.ResetColor();
+                    // }
+                    // if (ch == '\x15')
+                    // {
+                    //     Console.ForegroundColor = ConsoleColor.Yellow;
+                    //     Console.WriteLine($"[NAK received after: '{result}']");
+                    //     Console.ResetColor();
+                    // }
+                    // if (ch == '\x05')
+                    // {
+                    //     Console.ForegroundColor = ConsoleColor.Yellow;
+                    //     Console.WriteLine($"[ENQ received after: '{result}']");
+                    //     Console.ResetColor();
+                    // }
+                    
+                    return result;
+                }
+                else
+                {
+                    buffer.Append(ch);
+                }
             }
         }
     }
