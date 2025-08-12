@@ -141,13 +141,13 @@ namespace SerialChat
                     // }
                     if (ch == '\x15')
                     {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine($"[NAK Received: Bad command, or out of range command parameters]");
                         Console.ResetColor();
                     }
                     if (ch == '\x05')
                     {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.ForegroundColor = ConsoleColor.Red;
                         Console.WriteLine($"[ENQ Received: Bad command]");
                         Console.ResetColor();
                     }
