@@ -1,19 +1,35 @@
-﻿
-using System;
+﻿using System;
 using System.IO.Ports;
-using System.Threading;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SerialChat
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
-            const string portName = "/dev/serial0";
-            const int baudRate = 9600;
+            const string defaultPortName = "/dev/serial0";
+            int baudRate = 9600;
 
-            SerialPort serialPort = new SerialPort(portName, baudRate)
+            // Parse CLI arguments for baud rate
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--baud-rate" && i + 1 < args.Length)
+                {
+                    if (int.TryParse(args[i + 1], out int parsedBaud))
+                    {
+                        baudRate = parsedBaud;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Invalid baud rate: {args[i + 1]}. Using default {baudRate}.");
+                    }
+                }
+            }
+
+            SerialPort serialPort = new SerialPort(defaultPortName, baudRate)
             {
                 Parity = Parity.None,
                 DataBits = 8,
@@ -26,46 +42,45 @@ namespace SerialChat
             try
             {
                 serialPort.Open();
-                Console.WriteLine($"Connected to {portName} at {baudRate} bps.");
+                Console.WriteLine($"Connected to {defaultPortName} at {baudRate} bps.");
                 Console.WriteLine("Type messages and press Enter to send.\n");
 
-                // Thread for receiving messages
-                Thread receiveThread = new Thread(() =>
+                using CancellationTokenSource cts = new CancellationTokenSource();
+
+                // Receiving task
+                Task receiveTask = Task.Run(async () =>
                 {
-                    while (true)
+                    while (!cts.Token.IsCancellationRequested)
                     {
                         try
                         {
-                            string incoming = ReadLineWithACK(serialPort);
+                            string incoming = await ReadLineWithACKAsync(serialPort, cts.Token);
                             if (!string.IsNullOrEmpty(incoming))
                             {
                                 Console.ForegroundColor = ConsoleColor.Green;
-                                Console.WriteLine($"\nScanner: {incoming}");
+                                Console.WriteLine($"\rScanner: {incoming}");
                                 Console.ResetColor();
                                 Console.Write("You: ");
                             }
                         }
-                        catch (TimeoutException)
+                        catch (OperationCanceledException)
                         {
-                            // Ignore read timeouts
+                            // Graceful cancellation
+                            break;
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine($"[Receive Error] {ex.Message}");
-                            Console.WriteLine(ex);
                             break;
                         }
                     }
-                });
-
-                receiveThread.IsBackground = true;
-                receiveThread.Start();
+                }, cts.Token);
 
                 // Sending loop
                 while (true)
                 {
                     Console.Write("You: ");
-                    string message = Console.ReadLine();
+                    string? message = Console.ReadLine();
                     if (string.IsNullOrWhiteSpace(message)) continue;
 
                     if (message[0] == '!')
@@ -76,11 +91,11 @@ namespace SerialChat
                             Console.WriteLine("Exiting the application...");
                             break;
                         }
-                        else if (controlMessage == "activate")
+                        else if (controlMessage == "activate" || controlMessage == "a")
                         {
                             message = "\x16" + "T" + "\x0D";
                         }
-                        else if (controlMessage == "deactivate")
+                        else if (controlMessage == "deactivate" || controlMessage == "da")
                         {
                             message = "\x16" + "U" + "\x0D";
                         }
@@ -100,6 +115,10 @@ namespace SerialChat
                         break;
                     }
                 }
+
+                // Stop receive task
+                cts.Cancel();
+                await receiveTask;
             }
             catch (Exception ex)
             {
@@ -117,41 +136,49 @@ namespace SerialChat
         /// - Carriage Return (\r)
         /// - Line Feed (\n)
         /// - ASCII ACK character (\x06)
+        /// - ASCII NAK (\x15)
+        /// - ASCII ENQ (\x05)
         /// </summary>
-        static string ReadLineWithACK(SerialPort port)
+        static async Task<string> ReadLineWithACKAsync(SerialPort port, CancellationToken token)
         {
-            StringBuilder buffer = new StringBuilder();
-            
-            while (true)
+            byte[] buffer = new byte[1];
+            StringBuilder lineBuffer = new StringBuilder();
+
+            while (!token.IsCancellationRequested)
             {
-                int byteRead = port.ReadByte(); // This will throw TimeoutException if no data
-                char ch = (char)byteRead;
-                
-                // Check for termination characters
-                if (ch == '\r' || ch == '\n' || ch == '\x06' || ch == '\x15' || ch == '\x05') // CR, LF, ACK, NAK, or ENQ
+                int bytesRead = await port.BaseStream.ReadAsync(buffer, 0, 1, token);
+                if (bytesRead == 0) // No more data
+                    continue;
+
+                char ch = (char)buffer[0];
+
+                // Termination characters
+                if (ch == '\r' || ch == '\n' || ch == '\x06' || ch == '\x15' || ch == '\x05')
                 {
-                    string result = buffer.ToString();
-                    
+                    string result = lineBuffer.ToString();
+
                     if (ch == '\x15')
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"[NAK Received: Bad command, or out of range command parameters]");
+                        Console.WriteLine("[NAK Received: Bad command, or out of range command parameters]");
                         Console.ResetColor();
                     }
                     if (ch == '\x05')
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"[ENQ Received: Bad command]");
+                        Console.WriteLine("[ENQ Received: Bad command]");
                         Console.ResetColor();
                     }
-                    
+
                     return result;
                 }
                 else
                 {
-                    buffer.Append(ch);
+                    lineBuffer.Append(ch);
                 }
             }
+
+            return string.Empty;
         }
     }
 }
