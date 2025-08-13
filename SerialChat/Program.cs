@@ -132,13 +132,6 @@ namespace SerialChat
                 {
                     string result = buffer.ToString();
                     
-                    // Display special characters for debugging
-                    // if (ch == '\x06')
-                    // {
-                    //     Console.ForegroundColor = ConsoleColor.Yellow;
-                    //     Console.WriteLine($"[ACK received after: '{result}']");
-                    //     Console.ResetColor();
-                    // }
                     if (ch == '\x15')
                     {
                         Console.ForegroundColor = ConsoleColor.Red;
